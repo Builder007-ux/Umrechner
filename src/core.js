@@ -6,12 +6,31 @@ const toIp = n => [24, 16, 8, 0].map(x => (n >>> x) & 255).join(".");
 const ipOk = o => o.length === 4 && o.every(x => x <= 255);
 const num = o => ((o[0] << 24) | (o[1] << 16) | (o[2] << 8) | o[3]) >>> 0;
 const maskOf = p => p === 0 ? 0 : (0xFFFFFFFF << (32 - p)) >>> 0;
+const fmt = n => !isFinite(n) ? String(n) : (Math.round(n * 1e6) / 1e6).toLocaleString("de-DE", { maximumFractionDigits: 6 });
+const fmt2 = n => !isFinite(n) ? String(n) : (Math.round(n * 100) / 100).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-// Neuen Rechner: Eintrag ergänzen. run(text) liefert {rows, swatch?} oder {error}.
+function makeLinearTool(opts) {
+  return {
+    name: opts.name, ph: opts.ph, hint: opts.hint, category: "mass",
+    run(s) {
+      const m = s.trim().replace(",", ".").match(/^(-?[\d.]+)\s*([a-zA-ZäöüÄÖÜß²³]+)$/);
+      if (!m) return { error: opts.hint };
+      const val = parseFloat(m[1]);
+      if (isNaN(val)) return { error: "Ungültige Zahl." };
+      const raw = m[2].toLowerCase();
+      const unit = opts.aliases[raw] || raw;
+      if (!(unit in opts.units)) return { error: `Unbekannte Einheit "${m[2]}". Erlaubt: ${opts.display.join(", ")}` };
+      const base = val * opts.units[unit];
+      return { rows: opts.display.map(u => ({ label: opts.labels[u] || u, value: fmt(base / opts.units[u]) + " " + u, copy: fmt(base / opts.units[u]) })) };
+    },
+  };
+}
+
+// Neuen Rechner: Eintrag ergänzen. run(text) liefert {rows, swatch?} oder {error}, category ist "it", "mass" oder "currency".
 // Zeile: {label, value | parts[], copy?, send?:{tool,text}}
 const tools = {
   color: {
-    name: "Farbe", ph: "BC002D", hint: "Hex (BC002D, #BC0) oder RGB (188, 0, 45)",
+    name: "Farbe", ph: "BC002D", hint: "Hex (BC002D, #BC0) oder RGB (188, 0, 45)", category: "it",
     run(s) {
       let rgb, m;
       if (m = s.match(/^#?([0-9a-f]{3}|[0-9a-f]{6})$/i)) {
@@ -39,7 +58,7 @@ const tools = {
     },
   },
   base: {
-    name: "Zahlensysteme", ph: "255", hint: "Dezimal oder mit Präfix: 0b1010, 0xFF, 0o17",
+    name: "Zahlensysteme", ph: "255", hint: "Dezimal oder mit Präfix: 0b1010, 0xFF, 0o17", category: "it",
     run(s) {
       s = s.replace(/[_\s]/g, ""); let n;
       try {
@@ -56,16 +75,16 @@ const tools = {
     },
   },
   ip: {
-    name: "IPv4 / CIDR", ph: "192.168.1.10/24", hint: "IPv4-Adresse, optional mit /Präfix",
+    name: "IPv4 / CIDR", ph: "192.168.1.10/24", hint: "IPv4-Adresse, optional mit /Präfix", category: "it",
     run(s) {
       const m = s.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?:\/(\d{1,2}))?$/);
       if (!m) return { error: "Format: 192.168.1.10 oder 192.168.1.10/24" };
       const o = m.slice(1, 5).map(Number), p = m[5] === undefined ? null : Number(m[5]);
       if (!ipOk(o) || (p !== null && p > 32)) return { error: "Wert außerhalb des gültigen Bereichs." };
-      const n = num(o);
+      const n = num(o), oBin = o.map(x => x.toString(2).padStart(8, "0"));
       const rows = [
         { label: "Dezimal", value: String(n), send: { tool: "base", text: String(n) } },
-        { label: "Binär", parts: o.map(x => x.toString(2).padStart(8, "0")), copy: o.map(x => x.toString(2).padStart(8, "0")).join(".") },
+        { label: "Binär", parts: oBin, copy: oBin.join(".") },
         { label: "Hexadezimal", value: n.toString(16).toUpperCase().padStart(8, "0") },
       ];
       if (p !== null) {
@@ -81,7 +100,7 @@ const tools = {
     },
   },
   subnet: {
-    name: "Subnetze", ph: "192.168.0.0/24 in /26", hint: "Netz/Präfix in neues Präfix aufteilen, max. 64 Subnetze",
+    name: "Subnetze", ph: "192.168.0.0/24 in /26", hint: "Netz/Präfix in neues Präfix aufteilen, max. 64 Subnetze", category: "it",
     run(s) {
       const m = s.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\/(\d{1,2})\s+(?:in\s+)?\/?(\d{1,2})$/i);
       if (!m) return { error: "Format: 192.168.0.0/24 in /26" };
@@ -98,7 +117,7 @@ const tools = {
     },
   },
   mac: {
-    name: "MAC", ph: "AA:BB:CC:DD:EE:FF", hint: "Mit Doppelpunkt, Bindestrich, Punkt oder ohne Trennzeichen",
+    name: "MAC", ph: "AA:BB:CC:DD:EE:FF", hint: "Mit Doppelpunkt, Bindestrich, Punkt oder ohne Trennzeichen", category: "it",
     run(s) {
       if (!/^[0-9a-f:.\-\s]+$/i.test(s)) return { error: "Ungültige MAC-Adresse." };
       const h = s.replace(/[^0-9a-f]/gi, "").toLowerCase();
@@ -116,7 +135,7 @@ const tools = {
     },
   },
   time: {
-    name: "Zeitstempel", ph: "1790000000", hint: "Unix-Sekunden, Millisekunden, ISO-Datum oder „jetzt“",
+    name: "Zeitstempel", ph: "1790000000", hint: "Unix-Sekunden, Millisekunden, ISO-Datum oder „jetzt“", category: "it",
     run(s) {
       let ms;
       if (/^(jetzt|now)$/i.test(s)) ms = Date.now();
@@ -132,7 +151,130 @@ const tools = {
       ]};
     },
   },
+  tz: {
+    name: "Zeitzonen", ph: "14:30", hint: "Uhrzeit (heute) oder Datum wie 2026-09-29 14:30, ausgehend von deiner lokalen Zeit", category: "it",
+    run(s) {
+      let d;
+      const hm = s.trim().match(/^(\d{1,2}):(\d{2})$/);
+      if (hm) { d = new Date(); d.setHours(+hm[1], +hm[2], 0, 0); }
+      else d = new Date(s);
+      if (isNaN(d)) return { error: "Kein gültiges Datum oder Uhrzeit." };
+      const zones = [
+        ["Berlin", "Europe/Berlin"], ["UTC", "UTC"], ["London", "Europe/London"],
+        ["New York", "America/New_York"], ["Los Angeles", "America/Los_Angeles"],
+        ["Tokio", "Asia/Tokyo"], ["Sydney", "Australia/Sydney"],
+      ];
+      return { rows: zones.map(([label, tz]) => ({
+        label, value: d.toLocaleString("de-DE", { timeZone: tz, dateStyle: "medium", timeStyle: "short" }),
+      }))};
+    },
+  },
+  base64: {
+    name: "Base64", ph: "Hallo Welt", hint: "Text wird kodiert, gültiges Base64 zusätzlich dekodiert", category: "it",
+    run(s) {
+      let enc;
+      try { enc = btoa(unescape(encodeURIComponent(s))); }
+      catch { return { error: "Text konnte nicht kodiert werden." }; }
+      const rows = [{ label: "Kodiert", value: enc }];
+      if (/^[A-Za-z0-9+/]+={0,2}$/.test(s) && s.length % 4 === 0) {
+        try { rows.push({ label: "Dekodiert", value: decodeURIComponent(escape(atob(s))) }); } catch {}
+      }
+      return { rows };
+    },
+  },
+  json: {
+    name: "JSON", ph: '{"a":1,"b":[2,3]}', hint: "JSON validieren und formatieren", category: "it",
+    run(s) {
+      let v;
+      try { v = JSON.parse(s); } catch (e) { return { error: "Ungültiges JSON: " + e.message }; }
+      return { rows: [
+        { label: "Formatiert", value: JSON.stringify(v, null, 2) },
+        { label: "Kompakt", value: JSON.stringify(v) },
+      ]};
+    },
+  },
+
+  length: makeLinearTool({
+    name: "Länge", ph: "5 km", hint: "Zahl mit Einheit: mm, cm, m, km, in, ft, yd, mi",
+    units: { mm: 0.001, cm: 0.01, m: 1, km: 1000, in: 0.0254, ft: 0.3048, yd: 0.9144, mi: 1609.344 },
+    aliases: { zoll: "in", "\"": "in", fuß: "ft", fuss: "ft", yard: "yd", meile: "mi", meilen: "mi" },
+    display: ["mm", "cm", "m", "km", "in", "ft", "yd", "mi"],
+    labels: { mm: "Millimeter", cm: "Zentimeter", m: "Meter", km: "Kilometer", in: "Zoll (in)", ft: "Fuß (ft)", yd: "Yard", mi: "Meile" },
+  }),
+  weight: makeLinearTool({
+    name: "Gewicht", ph: "5 kg", hint: "Zahl mit Einheit: mg, g, kg, t, lb, oz",
+    units: { mg: 0.001, g: 1, kg: 1000, t: 1000000, lb: 453.59237, oz: 28.349523125 },
+    aliases: { pfund: "lb", unze: "oz", tonne: "t", tonnen: "t" },
+    display: ["mg", "g", "kg", "t", "lb", "oz"],
+    labels: { mg: "Milligramm", g: "Gramm", kg: "Kilogramm", t: "Tonne", lb: "Pfund (lb)", oz: "Unze (oz)" },
+  }),
+  volume: makeLinearTool({
+    name: "Volumen", ph: "5 l", hint: "Zahl mit Einheit: ml, cl, l, m3, gal",
+    units: { ml: 0.001, cl: 0.01, l: 1, m3: 1000, gal: 3.785411784 },
+    aliases: { "m³": "m3", gallone: "gal", gallonen: "gal" },
+    display: ["ml", "cl", "l", "m3", "gal"],
+    labels: { ml: "Milliliter", cl: "Zentiliter", l: "Liter", m3: "Kubikmeter", gal: "US-Gallone" },
+  }),
+  temp: {
+    name: "Temperatur", ph: "36,6 C", hint: "Zahl mit Einheit: C, F oder K", category: "mass",
+    run(s) {
+      const m = s.trim().replace(",", ".").match(/^(-?[\d.]+)\s*°?\s*(c|f|k)$/i);
+      if (!m) return { error: "Format: Zahl mit C, F oder K, z. B. 36,6 C" };
+      const val = parseFloat(m[1]), unit = m[2].toLowerCase();
+      let c;
+      if (unit === "c") c = val;
+      else if (unit === "f") c = (val - 32) * 5 / 9;
+      else c = val - 273.15;
+      if (c < -273.15) return { error: "Tiefer als der absolute Nullpunkt geht nicht." };
+      return { rows: [
+        { label: "Celsius", value: fmt2(c) + " °C" },
+        { label: "Fahrenheit", value: fmt2(c * 9 / 5 + 32) + " °F" },
+        { label: "Kelvin", value: fmt2(c + 273.15) + " K" },
+      ]};
+    },
+  },
+
+  currency: {
+    name: "Währungen", ph: "100 USD", hint: "Betrag und Währungscode, z. B. 100 USD — Tageskurse der EZB, nicht in Echtzeit", category: "currency",
+    async run(s) {
+      const m = s.trim().match(/^([\d.,]+)\s*([A-Za-z]{3})$/);
+      if (!m) return { error: "Format: Betrag und Währungscode, z. B. 100 USD" };
+      const amount = parseFloat(m[1].replace(",", "."));
+      if (isNaN(amount) || amount < 0) return { error: "Ungültiger Betrag." };
+      const from = m[2].toUpperCase();
+      let data;
+      try { data = await getRates(from); }
+      catch (e) {
+        if (e && e.notFound) return { error: `Währung "${from}" wird nicht unterstützt.` };
+        return { error: "Kurse aktuell nicht verfügbar (keine Internetverbindung oder Dienst nicht erreichbar)." };
+      }
+      const majors = ["EUR", "USD", "GBP", "JPY", "CHF", "CAD", "AUD", "CNY"];
+      const targets = majors.filter(c => c !== from && data.rates[c] !== undefined);
+      if (!targets.length) return { error: `Für "${from}" liegen keine Vergleichswerte vor.` };
+      const rows = targets.map(t => ({ label: t, value: fmt2(amount * data.rates[t]) + " " + t, copy: fmt2(amount * data.rates[t]) }));
+      rows.push({ label: "Datenstand", value: data.date + " (EZB-Referenzkurs)" });
+      return { rows };
+    },
+  },
 };
+
+async function getRates(from) {
+  const key = "fx:" + from, today = new Date().toISOString().slice(0, 10);
+  try {
+    if (typeof localStorage !== "undefined") {
+      const c = JSON.parse(localStorage.getItem(key) || "null");
+      if (c && c.date === today) return c;
+    }
+  } catch {}
+  const res = await fetch("https://api.frankfurter.app/latest?from=" + encodeURIComponent(from));
+  if (res.status === 404) { const e = new Error("unknown currency"); e.notFound = true; throw e; }
+  if (!res.ok) throw new Error("http " + res.status);
+  const j = await res.json();
+  if (!j || !j.rates) throw new Error("bad response");
+  const data = { date: j.date, rates: j.rates };
+  try { if (typeof localStorage !== "undefined") localStorage.setItem(key, JSON.stringify(data)); } catch {}
+  return data;
+}
 
 const api = { tools, g4, toIp, ipOk, num, maskOf };
 if (typeof module !== "undefined" && module.exports) module.exports = api;

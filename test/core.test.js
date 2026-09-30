@@ -73,3 +73,71 @@ test("Farbe", () => {
   assert.strictEqual(val(tools.color.run("FF0000"), "CSS HSL"), "hsl(0, 100%, 50%)");
   assert.ok(tools.color.run("256,0,0").error);
 });
+
+test("Base64", () => {
+  const r = tools.base64.run("Hallo Welt");
+  assert.strictEqual(val(r, "Kodiert"), "SGFsbG8gV2VsdA==");
+  const d = tools.base64.run("SGFsbG8gV2VsdA==");
+  assert.strictEqual(val(d, "Dekodiert"), "Hallo Welt");
+});
+
+test("JSON", () => {
+  const r = tools.json.run('{"a":1,"b":[2,3]}');
+  assert.strictEqual(val(r, "Kompakt"), '{"a":1,"b":[2,3]}');
+  assert.ok(val(r, "Formatiert").includes("\n"));
+  assert.ok(tools.json.run("{a:1}").error);
+});
+
+test("Zeitzonen", () => {
+  const r = tools.tz.run("2026-01-15T12:00:00Z");
+  assert.strictEqual(val(r, "UTC"), "15.01.2026, 12:00");
+  assert.strictEqual(val(r, "Tokio"), "15.01.2026, 21:00");
+  assert.ok(tools.tz.run("nicht-datum").error);
+});
+
+test("Länge", () => {
+  const r = tools.length.run("5 km");
+  assert.strictEqual(val(r, "Meter"), "5.000 m");
+  assert.strictEqual(val(r, "Zoll (in)"), "196.850,393701 in");
+  assert.strictEqual(val(tools.length.run("12 zoll"), "Zentimeter"), "30,48 cm");
+  assert.ok(tools.length.run("5 xyz").error);
+  assert.ok(tools.length.run("nix").error);
+});
+
+test("Gewicht", () => {
+  const r = tools.weight.run("2 kg");
+  assert.strictEqual(val(r, "Gramm"), "2.000 g");
+  assert.strictEqual(val(tools.weight.run("1 pfund"), "Kilogramm"), "0,453592 kg");
+});
+
+test("Volumen", () => {
+  const r = tools.volume.run("1,5 l");
+  assert.strictEqual(val(r, "Milliliter"), "1.500 ml");
+});
+
+test("Temperatur", () => {
+  const r = tools.temp.run("36,6 C");
+  assert.strictEqual(val(r, "Fahrenheit"), "97,88 °F");
+  assert.strictEqual(val(tools.temp.run("32 F"), "Celsius"), "0,00 °C");
+  assert.strictEqual(val(tools.temp.run("0 K"), "Celsius"), "-273,15 °C");
+  assert.ok(tools.temp.run("-300 C").error);
+  assert.ok(tools.temp.run("abc").error);
+});
+
+test("Währungen: ungültiges Format", async () => {
+  const r = await tools.currency.run("abc");
+  assert.ok(r.error);
+});
+
+test("Währungen: Netzwerk nicht verfügbar wird abgefangen", async () => {
+  // In dieser Testumgebung gibt es keinen Internetzugang; das ist genau der
+  // Pfad, den echte Nutzer offline ebenfalls sehen sollen.
+  const r = await tools.currency.run("100 USD");
+  assert.ok(r.error);
+});
+
+test("Kategorien sind gesetzt", () => {
+  for (const [id, t] of Object.entries(tools)) {
+    assert.ok(["it", "mass", "currency"].includes(t.category), id + " hat keine gültige Kategorie");
+  }
+});

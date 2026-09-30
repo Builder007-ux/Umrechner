@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Umrechner-Werkzeugkasten</title>
-<meta name="description" content="Umrechner für Entwickler und Admins: Zahlensysteme, IPv4/CIDR, Subnetze, MAC, Zeitstempel und Farben. Läuft komplett im Browser.">
+<meta name="description" content="Umrechner für IT/Netze, Maße und Währungen: Zahlensysteme, IPv4/CIDR, Subnetze, MAC, Zeitstempel, Farben, Längen, Gewichte, Temperatur und Wechselkurse. Läuft komplett im Browser.">
 <meta name="theme-color" content="#0c1222">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23a3e635'/%3E%3Ctext x='16' y='23' font-size='20' font-weight='700' text-anchor='middle' font-family='monospace' fill='%2310151f'%3E%3D%3C/text%3E%3C/svg%3E">
 <style>
@@ -12,13 +12,16 @@
 *{box-sizing:border-box}
 body{margin:0;min-height:100vh;background:linear-gradient(#0c1222,#0a0f1c);color:var(--ink);font:16px/1.5 Inter,system-ui,sans-serif}
 main{max-width:680px;margin:0 auto;padding:24px 16px 48px;display:grid;gap:14px}
-h1{margin:0;font-size:1.4rem}
+h1{margin:0;font-size:1.4rem;text-align:center}
+.sub{color:var(--mute);font-size:.875rem;text-align:center;margin:-8px 0 4px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px 24px}
 .lab{color:var(--lime);font-weight:700}
-.tabs{display:flex;gap:6px;flex-wrap:wrap}
+.cats{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.cats button{padding:6px 18px;font-weight:600}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;justify-content:center}
 button{font:inherit;cursor:pointer;color:var(--ink);background:none;border:1px solid var(--line);border-radius:999px;padding:4px 14px}
 button:hover{border-color:var(--lime)}
-.tabs button[aria-pressed=true]{background:var(--lime);border-color:var(--lime);color:#10151f;font-weight:600}
+.cats button[aria-pressed=true],.tabs button[aria-pressed=true]{background:var(--lime);border-color:var(--lime);color:#10151f;font-weight:600}
 :focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 .top{display:flex;gap:24px;align-items:flex-start;justify-content:space-between}
 .top>div:first-child{flex:1;min-width:0}
@@ -31,19 +34,23 @@ input:focus{border-color:var(--blue);outline:0}
 .res .lab{flex:0 0 170px}
 .val{flex:1;min-width:200px;display:flex;gap:10px;flex-wrap:wrap;background:var(--box);border-radius:8px;padding:14px 18px;font:1rem ui-monospace,monospace;word-break:break-all}
 .p0{color:var(--red)}.p1{color:var(--lime)}.p2{color:var(--blue)}
-.foot{color:var(--mute);font-size:.8rem;text-align:center;margin:8px 0 0}
 .err{color:var(--err);margin:0}
 .sm{font-size:.8rem;padding:2px 10px}
 .hist-h{display:flex;justify-content:space-between;align-items:center;margin:0 0 8px}
 #hist{list-style:none;margin:0;padding:0}
 #hist button{width:100%;text-align:left;border:0;border-radius:6px;padding:6px 8px;font:.875rem ui-monospace,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #hist button:hover{background:var(--box)}
+.foot{color:var(--mute);font-size:.8rem;text-align:center;margin:8px 0 0}
+.foot a{color:inherit}
+.loading{color:var(--mute)}
 </style>
 </head>
 <body>
 <main>
 <h1>Umrechner-Werkzeugkasten</h1>
+<p class="sub">Für Entwickler, Admins und alle, die mit IPs, Zahlensystemen, Maßen und Währungen arbeiten.</p>
 <noscript><div class="card">Für die Rechner wird JavaScript benötigt.</div></noscript>
+<div class="cats" id="cats"></div>
 <div class="tabs" id="tabs"></div>
 <div class="card top">
   <div>
@@ -60,39 +67,100 @@ input:focus{border-color:var(--blue);outline:0}
   <ul id="hist"></ul>
   <p class="hint" id="empty" style="margin:0">Noch keine Einträge. Umrechnungen erscheinen hier.</p>
 </div>
-<p class="foot">Alle Eingaben bleiben in deinem Browser. Es wird nichts an einen Server gesendet.</p>
+<p class="foot">Alle Eingaben bleiben in deinem Browser, nur die Währungsumrechnung fragt tagesaktuelle Kurse ab. &middot; <a href="https://github.com/builder007-ux/Umrechner">Quellcode auf GitHub</a></p>
 </main>
 <script src="src/core.js"></script>
 <script>
+const { tools } = Core;
+</script>
+<script>
 const $ = id => document.getElementById(id);
 const el = (t, c, x) => { const e = document.createElement(t); if (c) e.className = c; if (x !== undefined) e.textContent = x; return e; };
-const { tools } = Core;
 
-let current = "color", verlauf = [];
+const categories = [
+  { id: "it", name: "IT & Netze" },
+  { id: "mass", name: "Maße" },
+  { id: "currency", name: "Währungen" },
+];
+const byCategory = id => Object.keys(tools).filter(k => tools[k].category === id);
+
+let current = "color", activeCat = "it", verlauf = [], lastRun = null, runToken = 0;
 try { verlauf = JSON.parse(localStorage.getItem("hist") || "[]"); } catch {}
 const save = () => { try { localStorage.setItem("hist", JSON.stringify(verlauf)); } catch {} };
 
-const setHash = s => { try { window.history.replaceState(null, "", s ? "#" + s : location.pathname + location.search); } catch { location.hash = s; } };
+const catButtons = categories.map(c => {
+  const b = el("button", "", c.name); b.dataset.id = c.id;
+  b.onclick = () => { addHistory(); setCategory(c.id); };
+  $("cats").append(b);
+  return b;
+});
+let toolButtons = [];
+
+function rebuildToolTabs(catId) {
+  activeCat = catId;
+  catButtons.forEach(b => b.setAttribute("aria-pressed", b.dataset.id === catId));
+  try { localStorage.setItem("lastCat", catId); } catch {}
+  $("tabs").textContent = "";
+  toolButtons = byCategory(catId).map(id => {
+    const b = el("button", "", tools[id].name); b.dataset.id = id;
+    b.onclick = () => { addHistory(); jumpTo(id, ""); };
+    $("tabs").append(b);
+    return b;
+  });
+}
+
+// Kategorie per Klick wählen: merkt sich, welcher Rechner dort zuletzt offen war.
+function setCategory(catId) {
+  rebuildToolTabs(catId);
+  let start;
+  try { start = localStorage.getItem("lastTool:" + catId); } catch {}
+  if (!start || tools[start]?.category !== catId) start = byCategory(catId)[0];
+  setTool(start, "");
+}
+
+// Gezielt zu einem Rechner springen (Verlauf, "Weiter"-Button, Link mit #t=...).
+function jumpTo(id, text) {
+  if (tools[id].category !== activeCat) rebuildToolTabs(tools[id].category);
+  setTool(id, text);
+}
 
 function setTool(id, text = "") {
   current = id; $("q").value = text; $("q").placeholder = tools[id].ph; $("hint").textContent = tools[id].hint;
-  document.querySelectorAll("#tabs button").forEach(b => b.setAttribute("aria-pressed", b.dataset.id === id));
+  toolButtons.forEach(b => b.setAttribute("aria-pressed", b.dataset.id === id));
+  try { localStorage.setItem("lastTool:" + tools[id].category, id); } catch {}
   render();
 }
 
-function render() {
-  const s = $("q").value.trim(), out = $("out"), sw = $("sw");
+function setHash(s) {
+  const v = s ? `t=${current}&q=${encodeURIComponent(s)}` : "";
+  try { window.history.replaceState(null, "", v ? "#" + v : location.pathname + location.search); } catch { location.hash = v; }
+}
+
+async function render() {
+  const s = $("q").value.trim(), out = $("out"), sw = $("sw"), token = ++runToken;
   out.textContent = ""; sw.hidden = true;
-  setHash(s ? `t=${current}&q=${encodeURIComponent(s)}` : "");
+  setHash(s);
   if (!s) {
     const c = el("div", "card"), b = el("button", "sm", "Beispiel: " + tools[current].ph);
     b.onclick = () => { $("q").value = tools[current].ph; render(); };
     c.append(el("p", "hint", "Gib oben einen Wert ein oder probiere ein Beispiel."), b);
     out.append(c); return;
   }
-  const r = tools[current].run(s);
+  let r = tools[current].run(s);
+  if (r && typeof r.then === "function") {
+    out.append(el("div", "card loading", "Kurse werden abgerufen …"));
+    r = await r;
+    if (token !== runToken) return;
+    out.textContent = "";
+  }
+  lastRun = { tool: current, text: s, r };
   if (r.error) { const c = el("div", "card"); c.append(el("p", "err", r.error)); out.append(c); return; }
   if (r.swatch) { sw.style.background = r.swatch; sw.hidden = false; }
+  if (current === "subnet" && r.rows.length > 1) {
+    const c = el("div", "card"), b = el("button", "sm", "Alle Adressen kopieren");
+    b.onclick = () => { navigator.clipboard?.writeText(r.rows.map(x => x.copy).join("\n")); b.textContent = "Kopiert"; setTimeout(() => b.textContent = "Alle Adressen kopieren", 1200); };
+    c.append(b); out.append(c);
+  }
   r.rows.forEach(row => {
     const c = el("div", "card res"), val = el("div", "val");
     if (row.parts) row.parts.forEach((p, i) => val.append(el("span", "p" + i, p)));
@@ -102,16 +170,19 @@ function render() {
     c.append(el("span", "lab", row.label + ":"), val, cp);
     if (row.send) {
       const b = el("button", "sm", "Weiter"); b.title = `In ${tools[row.send.tool].name} öffnen`;
-      b.onclick = () => { addHistory(); setTool(row.send.tool, row.send.text); };
+      b.onclick = () => { addHistory(); jumpTo(row.send.tool, row.send.text); };
       c.append(b);
     }
     out.append(c);
   });
 }
 
-function addHistory() {
+async function addHistory() {
   const s = $("q").value.trim();
-  if (!s || tools[current].run(s).error) return;
+  if (!s) return;
+  let r = (lastRun && lastRun.tool === current && lastRun.text === s) ? lastRun.r : tools[current].run(s);
+  if (r && typeof r.then === "function") r = await r;
+  if (r.error) return;
   verlauf = [{ tool: current, text: s }, ...verlauf.filter(h => !(h.tool === current && h.text === s))].slice(0, 30);
   save(); renderHistory();
 }
@@ -120,24 +191,33 @@ function renderHistory() {
   const ul = $("hist"); ul.textContent = ""; $("empty").hidden = verlauf.length > 0;
   verlauf.forEach(h => {
     const li = el("li"), b = el("button", "", `${tools[h.tool].name}: ${h.text}`);
-    b.title = b.textContent; b.onclick = () => setTool(h.tool, h.text);
+    b.title = b.textContent;
+    b.onclick = () => jumpTo(h.tool, h.text);
     li.append(b); ul.append(li);
   });
 }
 
-Object.entries(tools).forEach(([id, t]) => {
-  const b = el("button", "", t.name); b.dataset.id = id;
-  b.onclick = () => { addHistory(); setTool(id, ""); };
-  $("tabs").append(b);
-});
 $("q").addEventListener("input", render);
 $("q").addEventListener("keydown", e => { if (e.key === "Enter") addHistory(); });
+document.addEventListener("keydown", e => {
+  if (document.activeElement === $("q")) return;
+  const i = Number(e.key) - 1;
+  if (i >= 0 && i < toolButtons.length) { addHistory(); setTool(toolButtons[i].dataset.id, ""); }
+});
 $("go").onclick = addHistory;
 $("clr").onclick = () => { verlauf = []; save(); renderHistory(); };
 
 const params = new URLSearchParams(location.hash.slice(1));
 renderHistory();
-setTool(tools[params.get("t")] ? params.get("t") : "color", params.get("q") || "");
+const linkedTool = params.get("t");
+if (linkedTool && tools[linkedTool]) {
+  rebuildToolTabs(tools[linkedTool].category);
+  setTool(linkedTool, params.get("q") || "");
+} else {
+  let startCat = "it";
+  try { const c = localStorage.getItem("lastCat"); if (categories.some(x => x.id === c)) startCat = c; } catch {}
+  setCategory(startCat);
+}
 </script>
 </body>
 </html>
