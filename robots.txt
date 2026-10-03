@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://builder007-ux.github.io/Umrechner/sitemap.xml
